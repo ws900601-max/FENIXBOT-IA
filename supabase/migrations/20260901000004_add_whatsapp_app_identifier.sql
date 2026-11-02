@@ -1,0 +1,1 @@
+ALTER TABLE public.whatsapp_accounts ADD COLUMN app_id text;
