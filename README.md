@@ -11,7 +11,8 @@ Feito com TanStack Start, React 19, Tailwind e Supabase. Roda na Vercel (padrão
 2. Abra **SQL Editor → New query**, cole todo o conteúdo de `supabase/setup-completo.sql` e clique em **Run** (uma vez só, num projeto novo).
 3. Em **Authentication → URL Configuration**, coloque o endereço do site em **Site URL** (ex.: `https://fenixbot.vercel.app`) e adicione `https://SEU-SITE/**` em **Redirect URLs**.
 4. Em **Project Settings → API Keys**, anote a URL do projeto, a chave **publishable** e a chave **secret** (essa é secreta).
-5. Login com Google (opcional): **Authentication → Sign In / Providers → Google**.
+5. Login com Google (opcional): ative em **Authentication → Sign In / Providers → Google** e depois cadastre `VITE_GOOGLE_LOGIN=true` na Vercel para o botão aparecer.
+6. Durante os testes, se o e-mail de confirmação demorar (o plano grátis envia poucos por hora), desligue **Confirm email** em **Authentication → Sign In / Providers → Email**.
 
 ### 2. Chave da IA
 - Gemini (cota grátis): crie em [aistudio.google.com/apikey](https://aistudio.google.com/apikey) e use em `GOOGLE_GENERATIVE_AI_API_KEY`.

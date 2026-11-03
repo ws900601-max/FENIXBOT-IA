@@ -7,6 +7,14 @@ const embeddedSignupSchema = z.object({ organizationId: z.string().uuid(), code:
 const ACCOUNT_FIELDS = "id,waba_id,phone_number_id,app_id,business_name,display_phone_number,status,last_error,last_sync_at,connected_at";
 const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+// A conexão manual usa o token global do app da Meta, que enxerga todos os números dele.
+// Por isso só os donos da plataforma (PLATFORM_ADMIN_EMAILS) podem usá-la; clientes usam o cadastro integrado.
+function canUseManualConnection(claims: Record<string, unknown>) {
+  const allowed = (process.env["PLATFORM_ADMIN_EMAILS"] ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean);
+  const email = typeof claims["email"] === "string" ? claims["email"].toLowerCase() : "";
+  return Boolean(process.env["WHATSAPP_ACCESS_TOKEN"]) && allowed.includes(email);
+}
+
 async function requireManager(context: { supabase: any; userId: string }, organizationId: string) {
   const { data: allowed } = await context.supabase.rpc("has_org_role", { _organization_id: organizationId, _roles: ["administrador", "gerente"], _user_id: context.userId });
   if (!allowed) throw new Error("Somente administradores e gerentes podem configurar o WhatsApp.");
@@ -15,11 +23,12 @@ async function requireManager(context: { supabase: any; userId: string }, organi
 export const getWhatsAppSetup = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input) => z.object({ organizationId: z.string().uuid() }).parse(input)).handler(async ({ data, context }) => {
   const { data: account } = await context.supabase.from("whatsapp_accounts").select(ACCOUNT_FIELDS).eq("organization_id", data.organizationId).maybeSingle();
   const { whatsappSecretsConfigured, embeddedSignupConfig } = await import("./whatsapp.server");
-  return { account, credentialsConfigured: whatsappSecretsConfigured(), manualConnectionAvailable: Boolean(process.env["WHATSAPP_ACCESS_TOKEN"]), embeddedSignup: embeddedSignupConfig() };
+  return { account, credentialsConfigured: whatsappSecretsConfigured(), manualConnectionAvailable: canUseManualConnection(context.claims), embeddedSignup: embeddedSignupConfig() };
 });
 
 export const connectWhatsApp = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input) => accountSchema.parse(input)).handler(async ({ data, context }) => {
   await requireManager(context, data.organizationId);
+  if (!canUseManualConnection(context.claims)) throw new Error("Use o botão \"Conectar com a Meta\" para ligar o seu número.");
   const { whatsappSecretsConfigured, inspectWhatsAppNumber, globalAccessToken } = await import("./whatsapp.server");
   if (!whatsappSecretsConfigured()) throw new Error("Adicione as credenciais seguras da Meta antes de conectar.");
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

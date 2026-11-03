@@ -1,4 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { z } from "zod";
+import { formatPhone } from "@/lib/phone";
 import { useEffect, useMemo, useState } from "react";
 import { Search, Users } from "lucide-react";
 import { AppShell } from "@/components/app/app-shell";
@@ -10,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/use-workspace";
 
 export const Route = createFileRoute("/_authenticated/contatos")({
+  validateSearch: (search) => z.object({ q: z.string().max(100).optional() }).parse(search),
   head: () => ({ meta: [{ title: "Contatos — Fenixbot" }, { name: "description", content: "Todos os contatos da sua empresa em um só lugar." }, { property: "og:title", content: "Contatos — Fenixbot" }, { property: "og:description", content: "Lista de contatos com etapa, origem e pontuação." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }] }),
   component: Contatos,
 });
@@ -21,7 +24,9 @@ function Contatos() {
   const { workspace } = useWorkspace();
   const [rows, setRows] = useState<Contact[] | null>(null);
   const [error, setError] = useState("");
-  const [q, setQ] = useState("");
+  const { q: initialQuery } = Route.useSearch();
+  const [q, setQ] = useState(initialQuery ?? "");
+  useEffect(() => { setQ(initialQuery ?? ""); }, [initialQuery]);
   const [stage, setStage] = useState("todos");
   async function load() {
     if (!workspace) return; setError(""); setRows(null);
@@ -44,7 +49,7 @@ function Contatos() {
           <thead className="border-b text-left text-xs text-muted-foreground"><tr><th className="p-4 font-medium">Nome</th><th className="p-4 font-medium">Telefone</th><th className="hidden p-4 font-medium md:table-cell">Origem</th><th className="p-4 font-medium">Etapa</th><th className="hidden p-4 font-medium sm:table-cell">Pontuação</th><th className="hidden p-4 font-medium lg:table-cell">Última interação</th></tr></thead>
           <tbody>{list.map(c => <tr key={c.id} className="border-b last:border-0 hover:bg-muted/40">
             <td className="p-4"><p className="font-medium">{c.name}</p>{c.email && <p className="text-xs text-muted-foreground">{c.email}</p>}</td>
-            <td className="p-4 whitespace-nowrap">{c.phone}</td>
+            <td className="p-4 whitespace-nowrap">{c.phone.startsWith("ig:") ? "Instagram" : formatPhone(c.phone)}</td>
             <td className="hidden p-4 md:table-cell">{c.source}</td>
             <td className="p-4"><span className="rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground">{stages[c.stage] ?? c.stage}</span></td>
             <td className="hidden p-4 sm:table-cell">{c.lead_score}/100</td>

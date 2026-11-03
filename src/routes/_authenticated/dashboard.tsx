@@ -7,6 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { LoadError } from "@/components/app/load-state";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/use-workspace";
+import { useServerFn } from "@tanstack/react-start";
+import { getPlanStatus } from "@/lib/billing/billing.functions";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Central de comando — Fenixbot" }, { name: "description", content: "Mensagens, contatos, tokens de IA e conversões da sua operação." }, { property: "og:title", content: "Central de comando — Fenixbot" }, { property: "og:description", content: "Painel operacional da sua empresa no Fenixbot." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }] }),
@@ -24,6 +26,7 @@ function Dashboard() {
   const [data, setData] = useState<Data | null>(null);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const loadPlan = useServerFn(getPlanStatus);
 
   async function load() {
     if (!workspace) return;
@@ -40,13 +43,14 @@ function Dashboard() {
         count(m().gte("sent_at", month).eq("sender", "cliente")),
         supabase.from("contacts").select("stage,created_at").eq("organization_id", org),
         supabase.from("ai_usage_events").select("total_tokens").eq("organization_id", org).gte("created_at", month),
-        supabase.from("subscriptions").select("status,plans(name,ai_tokens)").eq("organization_id", org).maybeSingle(),
+        loadPlan({ data: { organizationId: org } }).then((data) => ({ data, error: null })).catch(() => ({ data: null, error: null })),
         supabase.from("ai_configurations").select("enabled").eq("organization_id", org).maybeSingle(),
         supabase.from("conversations").select("id,last_message,last_message_at,contacts(name)").eq("organization_id", org).order("last_message_at", { ascending: false }).limit(5),
         supabase.auth.getUser(),
       ]);
-      for (const r of [contacts, usage, sub, ai, recent]) if (r.error) throw r.error;
-      const plan = (sub.data as any)?.plans as { name: string; ai_tokens: number } | null;
+      for (const r of [contacts, usage, ai, recent]) if (r.error) throw r.error;
+      const access = sub.data;
+      const plan = access && access.status !== "bloqueado" ? { name: access.status === "teste" ? "Teste grátis" : access.planName ?? "", ai_tokens: access.limits.aiTokens } : null;
       const u = user.data.user; setName((u?.user_metadata?.["full_name"] as string)?.split(" ")[0] ?? u?.email?.split("@")[0] ?? "");
       setData({ today, month: monthC, prevMonth: prevC, incoming, outgoing: monthC - incoming, contacts: contacts.data ?? [], tokens: (usage.data ?? []).reduce((s, e) => s + (e.total_tokens ?? 0), 0), allowance: plan?.ai_tokens ?? null, planName: plan?.name ?? null, aiOn: !!ai.data?.enabled, recent: (recent.data as Conversation[]) ?? [] });
     } catch { setError("Os indicadores não puderam ser carregados."); }
@@ -85,7 +89,7 @@ function Dashboard() {
               <p className="mt-4 text-3xl font-semibold tracking-tight">{fmt(d.tokens)}{d.allowance ? <span className="text-lg text-muted-foreground"> / {fmt(d.allowance)}</span> : null}</p>
               {d.allowance ? <>
                 <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-gradient-to-r from-primary to-ring transition-all" style={{ width: `${pct}%` }} /></div>
-                <div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>{pct.toFixed(0)}% usado</span><span>{fmt(Math.max(0, d.allowance - d.tokens))} restantes</span></div>
+                <div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>{pct.toFixed(0)}% usado</span><span>{fmt(Math.max(0, d.allowance - d.tokens))} restantes{d.planName ? ` · ${d.planName}` : ""}</span></div>
               </> : <p className="mt-3 text-xs text-muted-foreground">Sem plano ativo. <Link to="/planos" className="text-primary hover:underline">Ver planos</Link></p>}
             </CardContent></Card>
             <Metric icon={Target} label="Taxa de conversão" value={`${rate.toFixed(1).replace(".", ",")}%`}
@@ -97,7 +101,7 @@ function Dashboard() {
               <Link key={c.id} to="/inbox" search={{ conversation: c.id }} className="flex items-center gap-3 rounded-md border-b px-2 py-3 transition-colors last:border-0 hover:bg-muted/50">
                 <span className="grid size-9 place-items-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">{c.contacts?.name?.slice(0, 2).toUpperCase() ?? "CT"}</span>
                 <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{c.contacts?.name ?? "Contato"}</p><p className="truncate text-xs text-muted-foreground">{c.last_message?.replace(/[*_#`]/g, "") ?? "Sem mensagens"}</p></div>
-                <span className="text-xs text-muted-foreground">{new Date(c.last_message_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                <span className="text-xs text-muted-foreground">{new Date(c.last_message_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
               </Link>))}</div>
               : <div className="py-12 text-center"><Clock3 className="mx-auto size-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">Nenhuma conversa ainda</p><p className="mt-1 text-xs text-muted-foreground">As novas conversas aparecerão aqui.</p></div>}
           </CardContent></Card>

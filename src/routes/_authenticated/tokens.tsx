@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/use-workspace";
+import { useServerFn } from "@tanstack/react-start";
+import { getPlanStatus } from "@/lib/billing/billing.functions";
 
 export const Route = createFileRoute("/_authenticated/tokens")({
   head: () => ({ meta: [{ title: "Tokens de IA — Fenixbot" }, { name: "description", content: "Acompanhe o consumo de tokens da Sexta Feira." }, { property: "og:title", content: "Tokens de IA — Fenixbot" }, { property: "og:description", content: "Uso diário, limite do plano e execuções da IA." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary" }] }),
@@ -20,15 +22,16 @@ function Tokens() {
   const [ev, setEv] = useState<Ev[] | null>(null);
   const [plan, setPlan] = useState<{ name: string; ai_tokens: number } | null>(null);
   const [error, setError] = useState("");
+  const loadPlan = useServerFn(getPlanStatus);
   async function load() {
     if (!workspace) return; setError(""); setEv(null);
     const now = new Date(); const month = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const [a, b] = await Promise.all([
       supabase.from("ai_usage_events").select("created_at,total_tokens,status,duration_ms").eq("organization_id", workspace.id).gte("created_at", month).order("created_at"),
-      supabase.from("subscriptions").select("status,plans(name,ai_tokens)").eq("organization_id", workspace.id).maybeSingle(),
+      loadPlan({ data: { organizationId: workspace.id } }).catch(() => null),
     ]);
-    if (a.error || b.error) { setError("O consumo não pôde ser carregado."); return; }
-    setPlan(((b.data as any)?.status === "ativa" ? (b.data as any).plans : null) ?? null); setEv(a.data as Ev[]);
+    if (a.error) { setError("O consumo não pôde ser carregado."); return; }
+    setPlan(b && b.status !== "bloqueado" ? { name: b.status === "teste" ? "Teste grátis (limites do Nano)" : b.planName ?? "", ai_tokens: b.limits.aiTokens } : null); setEv(a.data as Ev[]);
   }
   useEffect(() => { void load(); }, [workspace]);
 

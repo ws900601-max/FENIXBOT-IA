@@ -5,7 +5,7 @@ import { experimental_transcribe as transcribe, generateText } from "ai";
 // Gemini (cota grátis) é o padrão; a OpenAI entra quando só a chave dela estiver configurada ou AI_PROVIDER=openai.
 type ProviderName = "google" | "openai";
 
-const DEFAULT_MODELS: Record<ProviderName, string> = { google: "gemini-2.5-flash", openai: "gpt-4.1-mini" };
+const DEFAULT_MODELS: Record<ProviderName, string> = { google: "gemini-flash-latest", openai: "gpt-5.4-mini" };
 
 function providerName(): ProviderName {
   const chosen = process.env["AI_PROVIDER"];

@@ -18,6 +18,7 @@ async function fetchWorkspace(): Promise<WorkspaceResult> {
     .from("user_roles")
     .select("organization_id, role")
     .eq("user_id", user.id)
+    .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
   if (membershipError) throw membershipError;

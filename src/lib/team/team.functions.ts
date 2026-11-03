@@ -105,6 +105,12 @@ export const acceptInvitation = createServerFn({ method: "POST" }).middleware([r
   if (new Date(invitation.expires_at).getTime() < Date.now()) throw new Error("Este convite expirou. Peça um novo ao administrador.");
   const email = typeof context.claims.email === "string" ? context.claims.email.toLowerCase() : "";
   if (email !== invitation.email.toLowerCase()) throw new Error(`Este convite foi enviado para outro e-mail. Entre com a conta ${invitation.email}.`);
+  const { data: alreadyMember } = await supabaseAdmin.from("user_roles").select("id").eq("organization_id", invitation.organization_id).eq("user_id", context.userId).maybeSingle();
+  if (!alreadyMember) {
+    // Vários convites podem estar pendentes; o limite do plano vale na hora de entrar.
+    const { assertCanAddMember } = await import("@/lib/billing/entitlements.server");
+    await assertCanAddMember(supabaseAdmin, invitation.organization_id);
+  }
   const { error } = await supabaseAdmin.from("user_roles").upsert({ organization_id: invitation.organization_id, user_id: context.userId, role: invitation.role }, { onConflict: "organization_id,user_id" });
   if (error) throw new Error("Não foi possível entrar na equipe.");
   await supabaseAdmin.from("organization_invitations").update({ accepted_at: new Date().toISOString(), accepted_by: context.userId }).eq("id", invitation.id);

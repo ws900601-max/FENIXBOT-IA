@@ -32,7 +32,7 @@ import { sendConversationWhatsAppMessage } from "@/lib/whatsapp/whatsapp.functio
 import { sendConversationInstagramMessage } from "@/lib/instagram/instagram.functions";
 import { LoadError } from "@/components/app/load-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import { ChatText, Message, MessageContent } from "@/components/app/chat-message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 
 export const Route = createFileRoute("/_authenticated/inbox")({
@@ -106,6 +106,18 @@ function Inbox() {
   const sendWhatsApp = useServerFn(sendConversationWhatsAppMessage);
   const sendInstagram = useServerFn(sendConversationInstagramMessage);
 
+  const CONVERSATION_FIELDS = "id,organization_id,contact_id,channel,status,unread_count,handled_by_ai,last_message,last_message_at,contacts(name,phone,stage,lead_score,notes)";
+
+  // Atualiza a lista sem piscar a tela, mantendo a conversa aberta.
+  async function refreshList() {
+    if (!workspace) return;
+    const { data } = await supabase.from("conversations").select(CONVERSATION_FIELDS).eq("organization_id", workspace.id).order("last_message_at", { ascending: false });
+    if (!data) return;
+    const rows = data as Conv[];
+    setItems(rows);
+    setSelected((current) => current ? rows.find((row) => row.id === current.id) ?? current : rows[0] ?? null);
+  }
+
   async function load() {
     if (!workspace) return;
     setLoading(true);
@@ -114,7 +126,7 @@ function Inbox() {
       const [conversationResult, productResult, configResult] = await Promise.all([
       supabase
         .from("conversations")
-        .select("id,organization_id,contact_id,channel,status,unread_count,handled_by_ai,last_message,last_message_at,contacts(name,phone,stage,lead_score,notes)")
+        .select(CONVERSATION_FIELDS)
         .eq("organization_id", workspace.id)
         .order("last_message_at", { ascending: false }),
       supabase
@@ -143,6 +155,25 @@ function Inbox() {
   }
 
   useEffect(() => { void load(); }, [workspace]);
+
+  // Qualquer mensagem nova da empresa atualiza a lista: conversas novas e contadores aparecem sem recarregar.
+  useEffect(() => {
+    if (!workspace) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const channel = supabase.channel(`inbox:${workspace.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `organization_id=eq.${workspace.id}` }, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void refreshList(), 800);
+    }).subscribe();
+    return () => { clearTimeout(timer); void supabase.removeChannel(channel); };
+  }, [workspace]);
+
+  // Abrir a conversa marca as mensagens como lidas.
+  useEffect(() => {
+    if (!selected || !workspace || selected.unread_count === 0) return;
+    const id = selected.id;
+    setItems((current) => current.map((item) => item.id === id ? { ...item, unread_count: 0 } : item));
+    void supabase.from("conversations").update({ unread_count: 0 }).eq("id", id).eq("organization_id", workspace.id);
+  }, [selected?.id, selected?.unread_count, workspace]);
   useEffect(() => {
     if (!selected || !workspace) return;
     let active = true;
@@ -154,11 +185,16 @@ function Inbox() {
       .select("id,sender,body,sent_at")
       .eq("organization_id", workspace.id)
       .eq("conversation_id", selected.id)
-      .order("sent_at")
-      .then(({ data, error }) => { if (!active) return; if (error) setMessageError("As mensagens desta conversa não puderam ser carregadas."); else setMessages((data as Msg[]) ?? []); setMessagesLoading(false); });
+      .order("sent_at", { ascending: false })
+      .limit(300)
+      .then(({ data, error }) => { if (!active) return; if (error) setMessageError("As mensagens desta conversa não puderam ser carregadas."); else setMessages(((data as Msg[]) ?? []).reverse()); setMessagesLoading(false); });
     const channel = supabase.channel(`messages:${selected.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${selected.id}` }, (payload) => {
       const message = payload.new as Msg;
       setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message]);
+    }).on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter: `conversation_id=eq.${selected.id}` }, (payload) => {
+      // Ex.: o áudio do cliente terminou de ser transcrito.
+      const message = payload.new as Msg;
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, body: message.body } : item));
     }).subscribe();
     return () => { active = false; void supabase.removeChannel(channel); };
   }, [selected?.id, workspace]);
@@ -383,7 +419,7 @@ function Inbox() {
           </div>
 
            <div className="flex-1 space-y-4 overflow-y-auto bg-muted/20 p-4" role="log" aria-live="polite">
-             {messagesLoading ? <div className="space-y-3"><Skeleton className="h-14 w-2/3" /><Skeleton className="ml-auto h-14 w-1/2" /></div> : messageError ? <LoadError message={messageError} onRetry={() => { const current = selected; setSelected(null); queueMicrotask(() => setSelected(current)); }} /> : messages.map((message) => <Message key={message.id} from={message.sender === "cliente" ? "user" : "assistant"} className={message.sender === "cliente" ? "mr-auto" : "ml-auto"}><MessageContent className={message.sender === "cliente" ? "border bg-card px-3 py-2" : message.sender === "ia" ? "bg-primary px-3 py-2 text-primary-foreground" : "border border-primary/40 bg-secondary px-3 py-2 text-secondary-foreground"}>{message.sender !== "cliente" && <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide opacity-80">{message.sender === "ia" ? <><Bot className="size-3" />Sexta Feira · IA</> : <><Hand className="size-3" />Equipe</>}</p>}<MessageResponse>{message.body}</MessageResponse><p className="text-right text-[10px] opacity-60">{new Date(message.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p></MessageContent></Message>)}
+             {messagesLoading ? <div className="space-y-3"><Skeleton className="h-14 w-2/3" /><Skeleton className="ml-auto h-14 w-1/2" /></div> : messageError ? <LoadError message={messageError} onRetry={() => { const current = selected; setSelected(null); queueMicrotask(() => setSelected(current)); }} /> : messages.map((message) => <Message key={message.id} from={message.sender === "cliente" ? "user" : "assistant"} className={message.sender === "cliente" ? "mr-auto" : "ml-auto"}><MessageContent className={message.sender === "cliente" ? "border bg-card px-3 py-2" : message.sender === "ia" ? "bg-primary px-3 py-2 text-primary-foreground" : "border border-primary/40 bg-secondary px-3 py-2 text-secondary-foreground"}>{message.sender !== "cliente" && <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide opacity-80">{message.sender === "ia" ? <><Bot className="size-3" />Sexta Feira · IA</> : <><Hand className="size-3" />Equipe</>}</p>}<ChatText>{message.body}</ChatText><p className="text-right text-[10px] opacity-60">{new Date(message.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p></MessageContent></Message>)}
              {generating && !text && <Message from="assistant" className="ml-auto"><MessageContent className="bg-primary px-3 py-2 text-primary-foreground"><Shimmer className="text-primary-foreground">A Sexta Feira está escrevendo um rascunho…</Shimmer></MessageContent></Message>}
              {aiError && <div role="alert" className="ml-auto max-w-sm rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"><p>{aiError}</p><Button size="sm" variant="outline" className="mt-2" onClick={() => void generateAiReply()}><RefreshCw />Tentar novamente</Button></div>}
              {!messagesLoading && !messages.length && !generating && <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">A conversa ainda não possui mensagens.</div>}
