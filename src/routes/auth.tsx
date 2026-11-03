@@ -19,7 +19,7 @@ function AuthPage() {
     try {
       if (mode === "forgot") { const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/redefinir-senha` }); if (resetError) setError("Não foi possível enviar o link. Verifique o e-mail e tente novamente."); else setMessage("Enviamos as instruções para seu e-mail."); return; }
       if (mode === "signup") { const { data, error: signupError } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: `${window.location.origin}/auth`, data: { full_name: name } } }); if (signupError) setError("Não foi possível criar sua conta. Verifique os dados."); else if (!data.session) setMessage("Conta criada. Confirme seu e-mail para continuar."); else await navigate({ to: "/dashboard" }); return; }
-      const { error: loginError } = await supabase.auth.signInWithPassword({ email, password }); if (loginError) setError("E-mail ou senha incorretos."); else await navigate({ to: "/dashboard" });
+      const { error: loginError } = await supabase.auth.signInWithPassword({ email, password }); if (loginError) setError(loginError.code === "email_not_confirmed" ? "Confirme seu e-mail antes de entrar: abra o link que enviamos (veja também o spam)." : "E-mail ou senha incorretos."); else await navigate({ to: "/dashboard" });
     } catch { setError("A conexão demorou mais que o esperado. Tente novamente."); }
     finally { setBusy(false); }
   }
